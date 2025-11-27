@@ -1,0 +1,553 @@
+import javax.swing.*;
+import javax.swing.filechooser.FileNameExtensionFilter;
+import java.awt.*;
+import java.awt.image.BufferedImage;
+import java.io.File;
+import javax.imageio.ImageIO;
+import java.awt.event.*;
+import java.util.Arrays;
+
+public class Main extends JFrame {
+    private BufferedImage originalImage;
+    private BufferedImage processedImage;
+    private JLabel originalLabel;
+    private JLabel processedLabel;
+    private JPanel histogramPanel;
+    private JComboBox<String> methodComboBox;
+    private JSlider parameterSlider;
+    private JLabel parameterLabel;
+
+    public Main() {
+        setTitle("Обработка цифровых изображений");
+        setSize(1400, 800);
+        setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+        setLayout(new BorderLayout());
+
+        // Панель управления
+        JPanel controlPanel = new JPanel(new FlowLayout());
+
+        JButton loadButton = new JButton("Загрузить изображение");
+        loadButton.addActionListener(e -> loadImage());
+
+        String[] methods = {
+                "Оригинал",
+                "Линейное контрастирование",
+                "Эквализация гистограммы (RGB)",
+                "Эквализация гистограммы (HSV)",
+                "Фильтр Лапласа (увеличение резкости)",
+                "Фильтр повышения резкости (Unsharp Mask)",
+                "Высокочастотный фильтр Собеля"
+        };
+
+        methodComboBox = new JComboBox<>(methods);
+        methodComboBox.addActionListener(e -> processImage());
+
+        parameterLabel = new JLabel("Параметр: 50");
+        parameterSlider = new JSlider(0, 100, 50);
+        parameterSlider.addChangeListener(e -> {
+            parameterLabel.setText("Параметр: " + parameterSlider.getValue());
+            processImage();
+        });
+
+        JButton saveButton = new JButton("Сохранить результат");
+        saveButton.addActionListener(e -> saveImage());
+
+        controlPanel.add(loadButton);
+        controlPanel.add(new JLabel("Метод:"));
+        controlPanel.add(methodComboBox);
+        controlPanel.add(parameterLabel);
+        controlPanel.add(parameterSlider);
+        controlPanel.add(saveButton);
+
+        add(controlPanel, BorderLayout.NORTH);
+
+        // Панель изображений
+        JPanel imagePanel = new JPanel(new GridLayout(1, 2, 10, 10));
+
+        originalLabel = new JLabel("Оригинальное изображение", SwingConstants.CENTER);
+        originalLabel.setBorder(BorderFactory.createTitledBorder("Оригинал"));
+        originalLabel.setPreferredSize(new Dimension(600, 500));
+
+        processedLabel = new JLabel("Обработанное изображение", SwingConstants.CENTER);
+        processedLabel.setBorder(BorderFactory.createTitledBorder("Результат"));
+        processedLabel.setPreferredSize(new Dimension(600, 500));
+
+        imagePanel.add(originalLabel);
+        imagePanel.add(processedLabel);
+
+        add(imagePanel, BorderLayout.CENTER);
+
+        // Панель гистограмм
+        histogramPanel = new JPanel(new GridLayout(1, 2, 10, 10));
+        histogramPanel.setPreferredSize(new Dimension(1400, 200));
+        add(histogramPanel, BorderLayout.SOUTH);
+
+        setVisible(true);
+    }
+
+    private void loadImage() {
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setFileFilter(new FileNameExtensionFilter("Изображения", "jpg", "png", "bmp", "gif"));
+
+        if (fileChooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION) {
+            try {
+                File file = fileChooser.getSelectedFile();
+                originalImage = ImageIO.read(file);
+                displayImage(originalImage, originalLabel);
+                processImage();
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Ошибка загрузки: " + ex.getMessage());
+            }
+        }
+    }
+
+    private void processImage() {
+        if (originalImage == null) return;
+
+        String method = (String) methodComboBox.getSelectedItem();
+        double parameter = parameterSlider.getValue() / 100.0;
+
+        switch (method) {
+            case "Оригинал":
+                processedImage = copyImage(originalImage);
+                break;
+            case "Линейное контрастирование":
+                processedImage = linearContrast(originalImage, parameter);
+                break;
+            case "Эквализация гистограммы (RGB)":
+                processedImage = histogramEqualizationRGB(originalImage);
+                break;
+            case "Эквализация гистограммы (HSV)":
+                processedImage = histogramEqualizationHSV(originalImage);
+                break;
+            case "Фильтр Лапласа (увеличение резкости)":
+                processedImage = laplaceFilter(originalImage, parameter * 2);
+                break;
+            case "Фильтр повышения резкости (Unsharp Mask)":
+                processedImage = unsharpMask(originalImage, parameter * 2);
+                break;
+            case "Высокочастотный фильтр Собеля":
+                processedImage = sobelFilter(originalImage, parameter);
+                break;
+        }
+
+        displayImage(processedImage, processedLabel);
+        updateHistograms();
+    }
+
+    private void displayImage(BufferedImage img, JLabel label) {
+        if (img == null) return;
+
+        int maxWidth = 600;
+        int maxHeight = 500;
+        int width = img.getWidth();
+        int height = img.getHeight();
+
+        double scale = Math.min((double)maxWidth/width, (double)maxHeight/height);
+        int newWidth = (int)(width * scale);
+        int newHeight = (int)(height * scale);
+
+        Image scaled = img.getScaledInstance(newWidth, newHeight, Image.SCALE_SMOOTH);
+        label.setIcon(new ImageIcon(scaled));
+    }
+
+    private BufferedImage copyImage(BufferedImage source) {
+        BufferedImage copy = new BufferedImage(source.getWidth(), source.getHeight(), BufferedImage.TYPE_INT_RGB);
+        Graphics g = copy.getGraphics();
+        g.drawImage(source, 0, 0, null);
+        g.dispose();
+        return copy;
+    }
+
+    // Линейное контрастирование
+    private BufferedImage linearContrast(BufferedImage img, double alpha) {
+        BufferedImage result = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+        alpha = 1 + alpha * 2; // Масштабируем от 1 до 3
+
+        int[] minMax = findMinMax(img);
+        int min = minMax[0];
+        int max = minMax[1];
+
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int rgb = img.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF;
+                int g = (rgb >> 8) & 0xFF;
+                int b = rgb & 0xFF;
+
+                // Линейное растяжение контраста
+                r = clamp((int)((r - min) * 255.0 / (max - min) * alpha));
+                g = clamp((int)((g - min) * 255.0 / (max - min) * alpha));
+                b = clamp((int)((b - min) * 255.0 / (max - min) * alpha));
+
+                result.setRGB(x, y, (r << 16) | (g << 8) | b);
+            }
+        }
+        return result;
+    }
+
+    private int[] findMinMax(BufferedImage img) {
+        int min = 255, max = 0;
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int rgb = img.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF;
+                int g = (rgb >> 8) & 0xFF;
+                int b = rgb & 0xFF;
+                int avg = (r + g + b) / 3;
+                min = Math.min(min, avg);
+                max = Math.max(max, avg);
+            }
+        }
+        return new int[]{min, max};
+    }
+    
+    private BufferedImage histogramEqualizationRGB(BufferedImage img) {
+        BufferedImage result = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+        double parameter = parameterSlider.getValue() / 100.0;
+
+        int[][] histR = new int[256][1];
+        int[][] histG = new int[256][1];
+        int[][] histB = new int[256][1];
+        
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int rgb = img.getRGB(x, y);
+                histR[(rgb >> 16) & 0xFF][0]++;
+                histG[(rgb >> 8) & 0xFF][0]++;
+                histB[rgb & 0xFF][0]++;
+            }
+        }
+
+        int[] cdfR = computeCDF(histR);
+        int[] cdfG = computeCDF(histG);
+        int[] cdfB = computeCDF(histB);
+
+        int totalPixels = img.getWidth() * img.getHeight();
+
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int rgb = img.getRGB(x, y);
+                int r = (rgb >> 16) & 0xFF;
+                int g = (rgb >> 8) & 0xFF;
+                int b = rgb & 0xFF;
+
+                float equalizedR = (cdfR[r] * 255.0f) / totalPixels;
+                float equalizedG = (cdfG[g] * 255.0f) / totalPixels;
+                float equalizedB = (cdfB[b] * 255.0f) / totalPixels;
+
+                r = clamp((int)(r * (1 - parameter) + equalizedR * parameter));
+                g = clamp((int)(g * (1 - parameter) + equalizedG * parameter));
+                b = clamp((int)(b * (1 - parameter) + equalizedB * parameter));
+
+                result.setRGB(x, y, (r << 16) | (g << 8) | b);
+            }
+        }
+        return result;
+    }
+
+    private BufferedImage histogramEqualizationHSV(BufferedImage img) {
+        BufferedImage result = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+        double parameter = parameterSlider.getValue() / 100.0;
+
+        float[][] hsv = new float[img.getWidth()][img.getHeight()];
+        int[][] histogram = new int[256][1];
+
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int rgb = img.getRGB(x, y);
+                float[] hsvValues = rgbToHsv(rgb);
+                hsv[x][y] = hsvValues[2]; // Сохраняем V (яркость)
+                histogram[(int)(hsvValues[2] * 255)][0]++;
+            }
+        }
+
+        int[] cdf = computeCDF(histogram);
+        int totalPixels = img.getWidth() * img.getHeight();
+
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int rgb = img.getRGB(x, y);
+                float[] hsvValues = rgbToHsv(rgb);
+                float originalV = hsvValues[2]; 
+
+                int vIndex = (int)(hsvValues[2] * 255);
+                float equalizedV = (cdf[vIndex] * 1.0f) / totalPixels;
+                
+                hsvValues[2] = originalV * (1 - (float)parameter) + equalizedV * (float)parameter;
+
+                result.setRGB(x, y, hsvToRgb(hsvValues[0], hsvValues[1], hsvValues[2]));
+            }
+        }
+        return result;
+    }
+
+    private float[] rgbToHsv(int rgb) {
+        int r = (rgb >> 16) & 0xFF;
+        int g = (rgb >> 8) & 0xFF;
+        int b = rgb & 0xFF;
+
+        float[] hsv = new float[3];
+        Color.RGBtoHSB(r, g, b, hsv);
+        return hsv;
+    }
+
+    private int hsvToRgb(float h, float s, float v) {
+        return Color.HSBtoRGB(h, s, v);
+    }
+
+    private int[] computeCDF(int[][] histogram) {
+        int[] cdf = new int[256];
+        cdf[0] = histogram[0][0];
+        for (int i = 1; i < 256; i++) {
+            cdf[i] = cdf[i-1] + histogram[i][0];
+        }
+        return cdf;
+    }
+    
+    private BufferedImage laplaceFilter(BufferedImage img, double strength) {
+        BufferedImage result = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+
+        int[][] kernel = {
+                {0, -1, 0},
+                {-1, 4, -1},
+                {0, -1, 0}
+        };
+
+        for (int y = 1; y < img.getHeight() - 1; y++) {
+            for (int x = 1; x < img.getWidth() - 1; x++) {
+                int r = 0, g = 0, b = 0;
+
+                for (int ky = 0; ky < 3; ky++) {
+                    for (int kx = 0; kx < 3; kx++) {
+                        int rgb = img.getRGB(x + kx - 1, y + ky - 1);
+                        int pixel_r = (rgb >> 16) & 0xFF;
+                        int pixel_g = (rgb >> 8) & 0xFF;
+                        int pixel_b = rgb & 0xFF;
+
+                        r += pixel_r * kernel[ky][kx];
+                        g += pixel_g * kernel[ky][kx];
+                        b += pixel_b * kernel[ky][kx];
+                    }
+                }
+
+                int originalRgb = img.getRGB(x, y);
+                int orig_r = (originalRgb >> 16) & 0xFF;
+                int orig_g = (originalRgb >> 8) & 0xFF;
+                int orig_b = originalRgb & 0xFF;
+
+                r = clamp((int)(orig_r + r * strength));
+                g = clamp((int)(orig_g + g * strength));
+                b = clamp((int)(orig_b + b * strength));
+
+                result.setRGB(x, y, (r << 16) | (g << 8) | b);
+            }
+        }
+        return result;
+    }
+    
+    private BufferedImage unsharpMask(BufferedImage img, double amount) {
+        BufferedImage blurred = gaussianBlur(img, 1.5);
+        BufferedImage result = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int originalRgb = img.getRGB(x, y);
+                int blurredRgb = blurred.getRGB(x, y);
+
+                int orig_r = (originalRgb >> 16) & 0xFF;
+                int orig_g = (originalRgb >> 8) & 0xFF;
+                int orig_b = originalRgb & 0xFF;
+
+                int blur_r = (blurredRgb >> 16) & 0xFF;
+                int blur_g = (blurredRgb >> 8) & 0xFF;
+                int blur_b = blurredRgb & 0xFF;
+
+                int r = clamp((int)(orig_r + (orig_r - blur_r) * amount));
+                int g = clamp((int)(orig_g + (orig_g - blur_g) * amount));
+                int b = clamp((int)(orig_b + (orig_b - blur_b) * amount));
+
+                result.setRGB(x, y, (r << 16) | (g << 8) | b);
+            }
+        }
+        return result;
+    }
+
+    private BufferedImage gaussianBlur(BufferedImage img, double sigma) {
+        int size = 5;
+        double[][] kernel = new double[size][size];
+        double sum = 0;
+
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                int dx = x - size/2;
+                int dy = y - size/2;
+                kernel[y][x] = Math.exp(-(dx*dx + dy*dy) / (2*sigma*sigma));
+                sum += kernel[y][x];
+            }
+        }
+
+        for (int y = 0; y < size; y++) {
+            for (int x = 0; x < size; x++) {
+                kernel[y][x] /= sum;
+            }
+        }
+
+        BufferedImage result = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+
+        for (int y = size/2; y < img.getHeight() - size/2; y++) {
+            for (int x = size/2; x < img.getWidth() - size/2; x++) {
+                double r = 0, g = 0, b = 0;
+
+                for (int ky = 0; ky < size; ky++) {
+                    for (int kx = 0; kx < size; kx++) {
+                        int rgb = img.getRGB(x + kx - size/2, y + ky - size/2);
+                        r += ((rgb >> 16) & 0xFF) * kernel[ky][kx];
+                        g += ((rgb >> 8) & 0xFF) * kernel[ky][kx];
+                        b += (rgb & 0xFF) * kernel[ky][kx];
+                    }
+                }
+
+                result.setRGB(x, y, (clamp((int)r) << 16) | (clamp((int)g) << 8) | clamp((int)b));
+            }
+        }
+        return result;
+    }
+    
+    private BufferedImage sobelFilter(BufferedImage img, double threshold) {
+        BufferedImage result = new BufferedImage(img.getWidth(), img.getHeight(), BufferedImage.TYPE_INT_RGB);
+
+        int[][] sobelX = {{-1, 0, 1}, {-2, 0, 2}, {-1, 0, 1}};
+        int[][] sobelY = {{-1, -2, -1}, {0, 0, 0}, {1, 2, 1}};
+
+        for (int y = 1; y < img.getHeight() - 1; y++) {
+            for (int x = 1; x < img.getWidth() - 1; x++) {
+                int gx = 0, gy = 0;
+
+                for (int ky = 0; ky < 3; ky++) {
+                    for (int kx = 0; kx < 3; kx++) {
+                        int rgb = img.getRGB(x + kx - 1, y + ky - 1);
+                        int gray = ((rgb >> 16) & 0xFF + (rgb >> 8) & 0xFF + (rgb & 0xFF)) / 3;
+
+                        gx += gray * sobelX[ky][kx];
+                        gy += gray * sobelY[ky][kx];
+                    }
+                }
+
+                int magnitude = (int)Math.sqrt(gx*gx + gy*gy);
+
+                int originalRgb = img.getRGB(x, y);
+                int orig_r = (originalRgb >> 16) & 0xFF;
+                int orig_g = (originalRgb >> 8) & 0xFF;
+                int orig_b = originalRgb & 0xFF;
+
+                int r = clamp((int)(orig_r + magnitude * threshold));
+                int g = clamp((int)(orig_g + magnitude * threshold));
+                int b = clamp((int)(orig_b + magnitude * threshold));
+
+                result.setRGB(x, y, (r << 16) | (g << 8) | b);
+            }
+        }
+        return result;
+    }
+
+    private int clamp(int value) {
+        return Math.max(0, Math.min(255, value));
+    }
+
+    private void updateHistograms() {
+        histogramPanel.removeAll();
+
+        if (originalImage != null) {
+            histogramPanel.add(createHistogramPanel(originalImage, "Оригинал"));
+        }
+        if (processedImage != null) {
+            histogramPanel.add(createHistogramPanel(processedImage, "Результат"));
+        }
+
+        histogramPanel.revalidate();
+        histogramPanel.repaint();
+    }
+
+    private JPanel createHistogramPanel(BufferedImage img, String title) {
+        int[] histR = new int[256];
+        int[] histG = new int[256];
+        int[] histB = new int[256];
+
+        for (int y = 0; y < img.getHeight(); y++) {
+            for (int x = 0; x < img.getWidth(); x++) {
+                int rgb = img.getRGB(x, y);
+                histR[(rgb >> 16) & 0xFF]++;
+                histG[(rgb >> 8) & 0xFF]++;
+                histB[rgb & 0xFF]++;
+            }
+        }
+
+        int maxVal = Math.max(Arrays.stream(histR).max().getAsInt(),
+                Math.max(Arrays.stream(histG).max().getAsInt(),
+                        Arrays.stream(histB).max().getAsInt()));
+
+        JPanel panel = new JPanel() {
+            @Override
+            protected void paintComponent(Graphics g) {
+                super.paintComponent(g);
+                int width = getWidth();
+                int height = getHeight();
+
+                g.setColor(Color.WHITE);
+                g.fillRect(0, 0, width, height);
+
+                for (int i = 0; i < 256; i++) {
+                    int x = (i * width) / 256;
+                    int barWidth = Math.max(1, width / 256);
+
+                    int hR = (int)((histR[i] * (height - 20)) / (double)maxVal);
+                    int hG = (int)((histG[i] * (height - 20)) / (double)maxVal);
+                    int hB = (int)((histB[i] * (height - 20)) / (double)maxVal);
+
+                    g.setColor(new Color(255, 0, 0, 100));
+                    g.fillRect(x, height - hR, barWidth, hR);
+
+                    g.setColor(new Color(0, 255, 0, 100));
+                    g.fillRect(x, height - hG, barWidth, hG);
+
+                    g.setColor(new Color(0, 0, 255, 100));
+                    g.fillRect(x, height - hB, barWidth, hB);
+                }
+
+                g.setColor(Color.BLACK);
+                g.drawString(title, 10, 15);
+            }
+        };
+
+        panel.setBorder(BorderFactory.createLineBorder(Color.BLACK));
+        return panel;
+    }
+
+    private void saveImage() {
+        if (processedImage == null) {
+            JOptionPane.showMessageDialog(this, "Нет изображения для сохранения");
+            return;
+        }
+
+        JFileChooser fileChooser = new JFileChooser();
+        fileChooser.setFileFilter(new FileNameExtensionFilter("PNG изображения", "png"));
+
+        if (fileChooser.showSaveDialog(this) == JFileChooser.APPROVE_OPTION) {
+            try {
+                File file = fileChooser.getSelectedFile();
+                if (!file.getName().toLowerCase().endsWith(".png")) {
+                    file = new File(file.getAbsolutePath() + ".png");
+                }
+                ImageIO.write(processedImage, "png", file);
+                JOptionPane.showMessageDialog(this, "Изображение сохранено!");
+            } catch (Exception ex) {
+                JOptionPane.showMessageDialog(this, "Ошибка сохранения: " + ex.getMessage());
+            }
+        }
+    }
+
+    public static void main(String[] args) {
+        SwingUtilities.invokeLater(() -> new Main());
+    }
+}
